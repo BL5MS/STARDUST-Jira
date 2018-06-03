@@ -53,63 +53,55 @@ class JiraUserWrapper():
         # the Jira story ID and the int is the time worked on that story.
         self.issues_worked = {}
 
-def get_issues(jira_client, max_results=9999):
+def get_issues(jira_client, project_key, worklog_start_date, worklog_end_date, max_results=9999):
     """
     Uses a JQL query to return all the relvant issues as jira.Issues, 
     in a list.
     We only ask for the summary fields in the interests of saving time 
     waiting for query to finish.
     """
-    project_base_key = None
-    worklog_start_date = None
-    worklog_end_date = None
 
     jql_string = "project={0} and timespent > 0 and worklogDate >= \"{1}\""
     issue_fields="summary"
 
-    while not project_base_key:
-        project_base_key = input_func("Enter the JIRA Key for your JIRA project: ")
+    try:
+        datetime.strptime(worklog_start_date, "%Y/%m/%d")
+    except ValueError:
+        print("Date format not recognised.")
+        raise
 
-    while not worklog_start_date:
-        worklog_start_date = input_func("Please enter the starting date of your " 
-                                        "time tracking query in the format" 
-                                        " YYYY/MM/DD: ")
+    if not worklog_end_date:
+        jql_string = jql_string + " and workLogDate <= now()"
+
+    else:
         try:
-            datetime.strptime(worklog_start_date, "%Y/%m/%d")
+            datetime.strptime(worklog_end_date, "%Y/%m/%d")
         except ValueError:
             print("Date format not recognised.")
-            worklog_start_date = None
-
-    while not worklog_end_date:
-        worklog_end_date = input_func("Please enter the end date of your " 
-                                      "time tracking query in the format" 
-                                      " YYYY/MM/DD. Leave blank for a default of now: ")
-        if worklog_end_date == "":
-            worklog_end_date = datetime.now().strftime("%Y/%m/%d")
-            jql_string = jql_string + " and workLogDate <= now()"
-
+            raise
         else:
-            try:
-                datetime.strptime(worklog_end_date, "%Y/%m/%d")
-            except ValueError:
-                print("Date format not recognised.")
-                worklog_end_date = None
-            else:
-                jql_string = jql_string + " and workLogDate <= \"{0}\"".format(
-                                  worklog_end_date)
-
-
+            jql_string = jql_string + " and workLogDate <= \"{0}\"".format(
+                              worklog_end_date)
 
     return jira_client.search_issues(jql_string.format(project_base_key, worklog_start_date),
                                  fields=issue_fields, maxResults=max_results)
 
-def get_worklogs(jira_client, issue_list):
+def get_worklogs(jira_client, issue_list, min_date):
     """
     For a list of Jira issues. Get the associated worklogs for them.
     """
     worklogs = []
     for issue in issue_list:
-        worklogs.extend(jira_client.worklogs(issue=issue.key))
+        issue_worklogs = jira_client.worklogs(issue=issue.key)
+        for worklog in issue_worklogs:
+
+            # Replace the timezone info to allow comparisons of datetime.
+            # This isn't ideal but it's a quick and dirty way to do this
+            # comparison.
+            if datetime.strptime(
+                    worklog.started, "%Y-%m-%dT%H:%M:%S.%f%z").replace(
+                        tzinfo=None) >= min_date:
+                worklogs.append(worklog)
 
     return worklogs
 
@@ -143,11 +135,11 @@ def create_user_data(issue_list, worklogs):
 
         jira_user.total_time_worked += worklog.timeSpentSeconds
         user_issue_timespent += worklog.timeSpentSeconds
-        jira_user.issues_worked[corresponding_issue.key] = user_issue_timespent
+        jira_user.issues_worked[corresponding_issue.key] = (user_issue_timespent, corresponding_issue)
 
     return jira_users
 
-def print_output(jira_users):
+def print_output(jira_users, issues):
     """
     Prints the output in some kind of pretty format.
     """
@@ -155,16 +147,16 @@ def print_output(jira_users):
 
         # Convert the "jira time units" into days:
         user = jira_users.get(user_key)
-        days_worked = (user.total_time_worked/3600)/8
+        days_worked = (user.total_time_worked/3600.0)/8.0
 
         useroutput = "\nUser {0} has logged {1} days in total. \n" \
             "A breakdown of this timetracking is as follows: \n".format(
                 user_key, days_worked)
 
-        for story, jira_time in user.issues_worked.items():
-            days_worked = (jira_time/3600)/8
-            useroutput = useroutput + "Story: {0}, time_spent: {1} days.\n".format(
-                story, days_worked)
+        for story, issue_data in user.issues_worked.items():
+            days_worked = (issue_data[0]/3600.0)/8.0
+            useroutput = useroutput + "Story: {0}, time_spent: {1} days. Story Summary: {2}.\n".format(
+                story, days_worked, issue_data[1])
             
         print(useroutput)
 
@@ -174,25 +166,15 @@ def get_jira_client(username, password):
     Prompt user for relevant inputs, then create and return a JIRA python
     client.
     """
-    username = None
-    password = None
-    project_base_key = None
-    worklog_start_date = None
-
-    while not username:
-        username = input_func("Enter your Atlassian username: ")
-
-    while not password:
-        password = getpass.getpass("Enter your Password: ")
-
     return jira.JIRA(MSW_JIRA, auth=(username, password))
 
 
 def main():
 	args = parser.parse_args()
-    mswJira = get_jira_client()
-    issues = get_issues(mswJira)
-    worklogs = get_worklogs(mswJira, issues)
+    mswJira = get_jira_client(args.username, args.password)
+    issues = get_issues(mswJira, args.jira_key, args.start_date, args.end_date)
+    worklogs = get_worklogs(mswJira, issues, datetime.strptime(worklog_start_date, 
+    						"%Y/%m/%d"))
     users = create_user_data(issues, worklogs)
     print_output(users)
 
