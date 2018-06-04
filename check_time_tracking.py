@@ -25,7 +25,8 @@ parser.add_argument("-ed", dest="end_date", default=None, type=str, help="the en
 
 required_arguments = parser.add_argument_group("Required Arguments")
 required_arguments.add_argument("-u", dest="username", type=str, help="Your Jira username", required=True)
-required_arguments.add_argument("-pw", dest="password", type=str, help="Your Jira password", required=True)
+required_arguments.add_argument("-pw", dest="password", action="store_true", 
+                                help="Prompts for your Jira Password in echo free input", required=True)
 required_arguments.add_argument("-sd", dest="start_date", type=str, help="the starting date of your " 
                     "time tracking query in the format YYYY/MM/DD.", required=True)
 required_arguments.add_argument("-k", dest="jira_key", type=str, help="Your Jira Project Key", required=True)
@@ -83,7 +84,7 @@ def get_issues(jira_client, project_key, worklog_start_date, worklog_end_date, m
             jql_string = jql_string + " and workLogDate <= \"{0}\"".format(
                               worklog_end_date)
 
-    return jira_client.search_issues(jql_string.format(project_base_key, worklog_start_date),
+    return jira_client.search_issues(jql_string.format(project_key, worklog_start_date),
                                  fields=issue_fields, maxResults=max_results)
 
 def get_worklogs(jira_client, issue_list, min_date):
@@ -131,7 +132,7 @@ def create_user_data(issue_list, worklogs):
         corresponding_issue = get_corresponding_issue(worklog, issue_list)
 
         user_issue_timespent = jira_user.issues_worked.get(
-            corresponding_issue.key, 0)
+            corresponding_issue.key, (0,None))[0]
 
         jira_user.total_time_worked += worklog.timeSpentSeconds
         user_issue_timespent += worklog.timeSpentSeconds
@@ -139,7 +140,7 @@ def create_user_data(issue_list, worklogs):
 
     return jira_users
 
-def print_output(jira_users, issues):
+def print_output(jira_users):
     """
     Prints the output in some kind of pretty format.
     """
@@ -170,11 +171,14 @@ def get_jira_client(username, password):
 
 
 def main():
-	args = parser.parse_args()
+    args = parser.parse_args()
+    if args.password:
+        args.password=getpass.getpass("Enter your Jira Password")
+
     mswJira = get_jira_client(args.username, args.password)
     issues = get_issues(mswJira, args.jira_key, args.start_date, args.end_date)
-    worklogs = get_worklogs(mswJira, issues, datetime.strptime(worklog_start_date, 
-    						"%Y/%m/%d"))
+    worklogs = get_worklogs(mswJira, issues, datetime.strptime(args.start_date, 
+                            "%Y/%m/%d"))
     users = create_user_data(issues, worklogs)
     print_output(users)
 
