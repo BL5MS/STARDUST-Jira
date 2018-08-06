@@ -2,6 +2,8 @@ import jira
 import getpass
 import argparse
 from datetime import datetime
+from utils.common import get_jira_client, jira_seconds_to_days
+from utils.common import MSW_JIRA
 
 try:
     input_func = raw_input
@@ -15,8 +17,6 @@ except Exception as e:
 # Spits out all the users that have tracked time in that sprint, the total
 # time spent, and a breakdown between issues.
 ##############################################################################
-MSW_JIRA = "https://jira.datcon.co.uk"
-
 
 parser = argparse.ArgumentParser(description="Check STARDUST Timetracking")
 parser.add_argument("-S", dest="sprints", type=str, help="The comma sepearted list of Sprint IDs to check.")
@@ -160,14 +160,6 @@ def print_output(jira_users):
                 story, days_worked, issue_data[1])
             
         print(useroutput)
-
-
-def get_jira_client(username, password):
-    """
-    Prompt user for relevant inputs, then create and return a JIRA python
-    client.
-    """
-    return jira.JIRA(MSW_JIRA, auth=(username, password))
 
 
 def main():
