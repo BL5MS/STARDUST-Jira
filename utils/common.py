@@ -1,12 +1,13 @@
 import jira
 import getpass
 import argparse
+import os
 from datetime import datetime
 
-
 MSW_JIRA = "https://jira.datcon.co.uk"
-READ_ONLY_USER = "read.only"
-READ_ONLY_PW = "@Whewell1833!"
+READ_ONLY_USER = os.environ.get("JIRA_READ_ONLY")
+READ_ONLY_PW = os.environ.get("JIRA_READ_ONLY_PW")
+
 
 def get_jira_client(username=READ_ONLY_USER, password=READ_ONLY_PW):
     """

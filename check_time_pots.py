@@ -1,14 +1,14 @@
 import jira
-import getpass
 import argparse
 from datetime import datetime
 from utils.common import get_jira_client, jira_seconds_to_days
 from utils.common import MSW_JIRA
 import csv
+from utils.slack import barryBot
 
 ##############################################################################
 # A quick and dirty script which does the following:
-# Asks the User for their login for "jira.datcon.co.uk"
+# Uses the read-only user for jira
 # Asks what Project and dates they want to query time tracking for.
 # Spits out all the users that have tracked time in that sprint, the total
 # time spent, and a breakdown between issues.
@@ -67,7 +67,7 @@ def write_issues_into_csv(issues, file_name="default.csv"):
     """
     # Must open with type 'wb' and not just 'w' because
     # of https://stackoverflow.com/questions/3191528/csv-in-python-adding-an-extra-carriage-return-on-windows
-    with open(file_name, 'wb') as csv_file:
+    with open(file_name, 'w', newline="\n") as csv_file:
         writer = csv.writer(csv_file, delimiter=',')
         for issue_id, info in issues.items():
             writer.writerow([issue_id] + info)
@@ -105,6 +105,7 @@ def convert_issues_to_dict(issues):
 def compare_and_report_ind(new, old):
     if not old:
         print("No old info, skipping comparison")
+        result = (0, "None")
     else:
         diff = []
         new_issues = []
@@ -117,30 +118,32 @@ def compare_and_report_ind(new, old):
                 if old[issue_id] != new[issue_id]:
                     diff.append(issue_id)
 
-        print("These are the issues which are new:")
-        for issue_id in new_issues:
-            print("Issue Summary: {0}".format(new[issue_id][0]))
-            print("Original_Estimate: {0}".format(new[issue_id][1]))
-            print("Remaining_Estimate: {0}".format(new[issue_id][2]))
-            print("Time Spent: {0}".format(new[issue_id][3]))
+        report = ""
 
-        print("These are the issues which have changed:")
+        report += "\nThese are the issues which are new:"
+        for issue_id in new_issues:
+            report += "\nIssue Summary: {0}".format(new[issue_id][0])
+            report += "\nOriginal_Estimate: {0}".format(new[issue_id][1])
+            report += "\nRemaining_Estimate: {0}".format(new[issue_id][2])
+            report += "\nTime Spent: {0}".format(new[issue_id][3])
+
+        report += "\nThese are the issues which have changed:"
         for issue_id in diff:
-            print("Issue Summary: {0}".format(new[issue_id][0]))
+            report += "\nIssue Summary: {0}".format(new[issue_id][0])
             print ("Original Estimate:")
-            print("Old  : {0}".format(old[issue_id][1]))
-            print("New  : {0}".format(new[issue_id][1]))
-            print("Diff : {0}").format(new[issue_id][1]-old[issue_id][1])
+            report += "\nOld  : {0}".format(old[issue_id][1])
+            report += "\nNew  : {0}".format(new[issue_id][1])
+            report += "\nDiff : {0}".format(new[issue_id][1]-old[issue_id][1])
 
             print ("Remaining_Estimate")
-            print("Old  : {0}".format(old[issue_id][2]))
-            print("New  : {0}".format(new[issue_id][2]))
-            print("Diff : {0}").format(new[issue_id][2]-old[issue_id][2])
+            report += "\nOld  : {0}".format(old[issue_id][2])
+            report += "\nNew  : {0}".format(new[issue_id][2])
+            report += "\nDiff : {0}".format(new[issue_id][2]-old[issue_id][2])
 
-            print("Time Spent")
-            print("Old  : {0}".format(old[issue_id][3]))
-            print("New  : {0}".format(new[issue_id][3]))
-            print("Diff : {0}").format(new[issue_id][3]-old[issue_id][3])
+            report += "\nTime Spent"
+            report += "\nOld  : {0}".format(old[issue_id][3])
+            report += "\nNew  : {0}".format(new[issue_id][3])
+            report += "\nDiff : {0}".format(new[issue_id][3]-old[issue_id][3])
 
         # Now compare totals:
         new_total_original_est = 0
@@ -160,22 +163,27 @@ def compare_and_report_ind(new, old):
             old_total_est += timeinfo[2]
             old_total_time_spent += timeinfo[3]
 
-        print("Old time:")
-        print("Original_Estimate: {0}".format(old_total_original_est))
-        print("Remaining_Estimate: {0}".format(old_total_est))
-        print("Time Spent: {0}".format(old_total_time_spent))
-        print("Total PRD Time: {0}".format(
-              old_total_est + old_total_time_spent))
+        report += "\nOld time:"
+        report += "\nOriginal_Estimate: {0}".format(old_total_original_est)
+        report += "\nRemaining_Estimate: {0}".format(old_total_est)
+        report += "\nTime Spent: {0}".format(old_total_time_spent)
+        report += "\nTotal PRD Time: {0}".format(
+              old_total_est + old_total_time_spent)
 
-        print("New time:")
-        print("Original_Estimate: {0}".format(new_total_original_est))
-        print("Remaining_Estimate: {0}".format(new_total_est))
-        print("Time Spent: {0}".format(new_total_time_spent))
-        print("Total PRD Time: {0}".format(
-              new_total_est + new_total_time_spent))
+        report += "\nNew time:"
+        report += "\nOriginal_Estimate: {0}".format(new_total_original_est)
+        report += "\nRemaining_Estimate: {0}".format(new_total_est)
+        report += "\nTime Spent: {0}".format(new_total_time_spent)
+        report += "\nTotal PRD Time: {0}".format(
+              new_total_est + new_total_time_spent)
+
+        if len(diff+new_issues) > 0:
+            return (1, report)
+        else:
+            return (0, report)
 
 
-def main():
+def check_activity():
     args = parser.parse_args()
 
     mswJira = get_jira_client()
@@ -187,10 +195,13 @@ def main():
         old_issues = None
 
     new_issues = convert_issues_to_dict(new_issues)
-    compare_and_report_ind(new_issues, old_issues)
+    result = compare_and_report_ind(new_issues, old_issues)
 
     write_issues_into_csv(new_issues, args.csv_file)
 
+    if result[0]:
+        barryBot.send_message(result[1])
+
 
 if __name__ == '__main__':
-    main()
+    check_activity()
