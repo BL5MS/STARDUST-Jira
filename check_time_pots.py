@@ -49,13 +49,18 @@ def read_csv_into_issues(csvfile):
     try:
         with open(csvfile, 'r') as csv_file:
 
-            # BUG HERE
             issue_reader = csv.reader(csv_file, delimiter=',')
             for row in issue_reader:
                 # Pop 2 do stuff
+                # Pop the key first as otherwise the variable assignment is
+                # executed last & messes up the ordering.
+                # CSV order is ID, Summary, Original est, Remaining Est, TimeSpent
                 key = row.pop(0)
-                summary = row.pop(0)
-                issues[key] = [summary] + [float(i) for i in row]
+                issues[key] = {"Summary": row.pop(0),
+                               "Original_Estimate": float(row.pop(0)),
+                               "Remaining_Estimate": float(row.pop(0)),
+                               "TimeSpent": float(row.pop(0))}
+
     except IOError:
         print("File doesn't exist, creating.")
 
@@ -70,32 +75,28 @@ def write_issues_into_csv(issues, file_name="default.csv"):
     with open(file_name, 'w', newline="\n") as csv_file:
         writer = csv.writer(csv_file, delimiter=',')
         for issue_id, info in issues.items():
-            writer.writerow([issue_id] + info)
+            writer.writerow([issue_id, info['Summary'],
+                            info["Original_Estimate"],
+                            info["Remaining_Estimate"],
+                            info["TimeSpent"]])
 
 
 def convert_issues_to_dict(issues):
     """
     For the Jira issues, convert to a dict where the ID is
-    the Key and the items are a list of the time information
+    the Key and the items are a dict of the issue information
     """
     output = {}
 
     for issue in issues:
 
-        time_info = []
-
-        # Yes, having the summary as the first one in the list breaks
-        # the aspect of having the list being a "time info" variable
-        time_info.append(issue.fields.summary)
-
-        for time in [issue.fields.timeoriginalestimate,
-                     issue.fields.timeestimate,
-                     issue.fields.timespent]:
-
-            if time == None:
-                time = 0
-
-            time_info.append(jira_seconds_to_days(time))
+        time_info = {}
+        time_info["Summary"] = issue.fields.summary
+        time_info["Original_Estimate"] = jira_seconds_to_days(
+            issue.fields.timeoriginalestimate)
+        time_info["Remaining_Estimate"] = jira_seconds_to_days(
+            issue.fields.timeestimate)
+        time_info["TimeSpent"] = jira_seconds_to_days(issue.fields.timespent)
 
         output[issue.id] = time_info
 
@@ -118,32 +119,63 @@ def compare_and_report_ind(new, old):
                 if old[issue_id] != new[issue_id]:
                     diff.append(issue_id)
 
-        report = ""
+        report = []
 
-        report += "\nThese are the issues which are new:"
+        report_message = "\nReport for *new* issues:"
+        report.append(report_message)
+
         for issue_id in new_issues:
-            report += "\nIssue Summary: {0}".format(new[issue_id][0])
-            report += "\nOriginal_Estimate: {0}".format(new[issue_id][1])
-            report += "\nRemaining_Estimate: {0}".format(new[issue_id][2])
-            report += "\nTime Spent: {0}".format(new[issue_id][3])
+            report_message = "\nIssue Summary: {0}".format(
+                new[issue_id]["Summary"])
+            report_message += "\n```"
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "", "Ori. Est.", "Rem. Est.", "Time Spent")
 
-        report += "\nThese are the issues which have changed:"
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "",
+                new[issue_id]["Original_Estimate"],
+                new[issue_id]["Remaining_Estimate"],
+                new[issue_id]["TimeSpent"])
+
+            # We need an faff line here incase the new section is empty.
+            report_message += "\n" + "_"*20
+            report_message += "\n```"
+            report.append(report_message)
+
+        report_message = "\nReport for *old* issues:"
+        report.append(report_message)
         for issue_id in diff:
-            report += "\nIssue Summary: {0}".format(new[issue_id][0])
-            print ("Original Estimate:")
-            report += "\nOld  : {0}".format(old[issue_id][1])
-            report += "\nNew  : {0}".format(new[issue_id][1])
-            report += "\nDiff : {0}".format(new[issue_id][1]-old[issue_id][1])
+            report_message = "\nIssue Summary: {0}".format(
+                old[issue_id]["Summary"])
 
-            print ("Remaining_Estimate")
-            report += "\nOld  : {0}".format(old[issue_id][2])
-            report += "\nNew  : {0}".format(new[issue_id][2])
-            report += "\nDiff : {0}".format(new[issue_id][2]-old[issue_id][2])
+            report_message += "\n```"
 
-            report += "\nTime Spent"
-            report += "\nOld  : {0}".format(old[issue_id][3])
-            report += "\nNew  : {0}".format(new[issue_id][3])
-            report += "\nDiff : {0}".format(new[issue_id][3]-old[issue_id][3])
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "", "Ori. Est.", "Rem. Est.", "Time Spent")
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "Old",
+                old[issue_id]["Original_Estimate"],
+                old[issue_id]["Remaining_Estimate"],
+                old[issue_id]["TimeSpent"])
+
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "New",
+                new[issue_id]["Original_Estimate"],
+                new[issue_id]["Remaining_Estimate"],
+                new[issue_id]["TimeSpent"])
+
+            report_message += "\n{:<6} {:<10} {:<10} {:<12}".format(
+                "Diff",
+                new[issue_id]["Original_Estimate"] - old[issue_id][
+                    "Original_Estimate"],
+                new[issue_id]["Remaining_Estimate"] - old[issue_id][
+                    "Remaining_Estimate"],
+                new[issue_id]["TimeSpent"] - old[issue_id][
+                    "TimeSpent"],)
+
+            report_message += "\n" + "_"*20
+            report_message += "\n```"
+            report.append(report_message)
 
         # Now compare totals:
         new_total_original_est = 0
@@ -154,30 +186,37 @@ def compare_and_report_ind(new, old):
         old_total_time_spent = 0
 
         for issue_id, timeinfo in new.items():
-            new_total_original_est += timeinfo[1]
-            new_total_est += timeinfo[2]
-            new_total_time_spent += timeinfo[3]
+            new_total_original_est += timeinfo["Original_Estimate"]
+            new_total_est += timeinfo["Remaining_Estimate"]
+            new_total_time_spent += timeinfo["TimeSpent"]
 
         for issue_id, timeinfo in old.items():
-            old_total_original_est += timeinfo[1]
-            old_total_est += timeinfo[2]
-            old_total_time_spent += timeinfo[3]
+            old_total_original_est += timeinfo["Original_Estimate"]
+            old_total_est += timeinfo["Remaining_Estimate"]
+            old_total_time_spent += timeinfo["TimeSpent"]
 
-        report += "\nOld time:"
-        report += "\nOriginal_Estimate: {0}".format(old_total_original_est)
-        report += "\nRemaining_Estimate: {0}".format(old_total_est)
-        report += "\nTime Spent: {0}".format(old_total_time_spent)
-        report += "\nTotal PRD Time: {0}".format(
-              old_total_est + old_total_time_spent)
+        new_totals = new_total_est + new_total_time_spent
+        old_totals = old_total_est + old_total_time_spent
 
-        report += "\nNew time:"
-        report += "\nOriginal_Estimate: {0}".format(new_total_original_est)
-        report += "\nRemaining_Estimate: {0}".format(new_total_est)
-        report += "\nTime Spent: {0}".format(new_total_time_spent)
-        report += "\nTotal PRD Time: {0}".format(
-              new_total_est + new_total_time_spent)
+        report_message = "\n*Summary of Totals:*"
+        report_message += "\n```"
+        report_message += "\n{:<4} {:<10} {:<10} {:<12} {:<15}".format(
+                "", "Ori. Est.", "Rem. Est.", "Time Spent",
+                "Total PRD Time")
+        report_message += "\n{:<4} {:<10} {:<10} {:<12} {:<15}".format(
+                "Old", old_total_original_est, old_total_est, 
+                old_total_time_spent, old_totals)
 
-        if len(diff+new_issues) > 0:
+        report_message += "\n{:<4} {:<10} {:<10} {:<12} {:<15}".format(
+                "New", new_total_original_est, new_total_est, 
+                new_total_time_spent, new_totals)
+        
+        report_message += "\n" + "_"*20
+        report_message += "\n```"
+        report.append(report_message)
+
+        print(len(diff + new_issues))
+        if len(diff + new_issues) > 0:
             return (1, report)
         else:
             return (0, report)
@@ -200,7 +239,8 @@ def check_activity():
     write_issues_into_csv(new_issues, args.csv_file)
 
     if result[0]:
-        barryBot.send_message(result[1])
+        for message in result[1]:
+            barryBot.send_message(message)
 
 
 if __name__ == '__main__':

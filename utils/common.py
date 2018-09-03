@@ -18,4 +18,7 @@ def get_jira_client(username=READ_ONLY_USER, password=READ_ONLY_PW):
 
 
 def jira_seconds_to_days(seconds):
-	return (seconds/3600.0)/8.0
+    if seconds is None:
+        return 0
+    else:
+        return (seconds/3600.0)/8.0
